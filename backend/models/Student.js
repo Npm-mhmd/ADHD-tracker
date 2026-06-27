@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const config = require('../config/env');
+
+const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+
+const getEncryptionKey = () => crypto.scryptSync(config.encryptionKey, 'salt', 32);
 
 const observationSchema = new mongoose.Schema({
   category: {
@@ -52,6 +57,8 @@ const studentSchema = new mongoose.Schema({
   timestamps: true
 });
 
+studentSchema.index({ classId: 1, createdAt: -1 });
+
 // Generate a unique student ID
 studentSchema.statics.generateStudentId = function() {
   return crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -59,11 +66,10 @@ studentSchema.statics.generateStudentId = function() {
 
 // Encrypt student name before saving
 studentSchema.methods.encryptName = function(name) {
-  const algorithm = 'aes-256-cbc';
-  const key = crypto.scryptSync(process.env.ENCRYPTION_KEY || 'default-key-change-in-production', 'salt', 32);
+  const key = getEncryptionKey();
   const iv = crypto.randomBytes(16);
 
-  const cipher = crypto.createCipheriv(algorithm, key, iv);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
   let encrypted = cipher.update(name, 'utf8', 'hex');
   encrypted += cipher.final('hex');
 
@@ -73,14 +79,13 @@ studentSchema.methods.encryptName = function(name) {
 // Decrypt student name
 studentSchema.methods.decryptName = function() {
   try {
-    const algorithm = 'aes-256-cbc';
-    const key = crypto.scryptSync(process.env.ENCRYPTION_KEY || 'default-key-change-in-production', 'salt', 32);
+    const key = getEncryptionKey();
 
     const parts = this.encryptedName.split(':');
     const iv = Buffer.from(parts.shift(), 'hex');
     const encrypted = parts.join(':');
 
-    const decipher = crypto.createDecipheriv(algorithm, key, iv);
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv);
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
 

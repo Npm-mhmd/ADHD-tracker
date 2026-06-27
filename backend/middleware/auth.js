@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const config = require('../config/env');
 const User = require('../models/User');
 
 const auth = async (req, res, next) => {
@@ -9,7 +10,7 @@ const auth = async (req, res, next) => {
       return res.status(401).json({ message: 'No authentication token, access denied' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+    const decoded = jwt.verify(token, config.jwtSecret);
     const user = await User.findById(decoded.id).select('-password');
 
     if (!user) {
@@ -27,8 +28,8 @@ const auth = async (req, res, next) => {
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        message: 'Not authorized to access this route' 
+      return res.status(403).json({
+        message: 'Not authorized to access this route',
       });
     }
     next();

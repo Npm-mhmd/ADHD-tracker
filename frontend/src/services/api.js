@@ -1,12 +1,9 @@
 import axios from 'axios';
 
-let API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
-// Ensure the API URL includes the /api prefix if it's a production URL missing it
-if (API_URL && !API_URL.endsWith('/api')) {
-  // Only append if it doesn't already have it
-  API_URL = `${API_URL.replace(/\/$/, '')}/api`;
-}
+// Default to a same-origin relative path so the deployed SPA talks to the
+// Express server that serves it. Override with VITE_API_URL when the API
+// lives on a different origin.
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -30,15 +27,23 @@ api.interceptors.request.use(
   }
 );
 
-// Add response interceptor to handle errors
+// Add response interceptor to handle expired sessions
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid, clear token and redirect to login
+    const status = error.response?.status;
+    const requestUrl = error.config?.url || '';
+    const isAuthAttempt = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+    const hadToken = Boolean(localStorage.getItem('token'));
+
+    // Only force a logout when a previously authenticated session expires —
+    // not when a login/register attempt itself returns 401.
+    if (status === 401 && hadToken && !isAuthAttempt) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -49,6 +54,9 @@ export const authAPI = {
   register: (userData) => api.post('/auth/register', userData),
   login: (credentials) => api.post('/auth/login', credentials),
   getCurrentUser: () => api.get('/auth/me'),
+  updateProfile: (profileData) => api.put('/auth/profile', profileData),
+  changePassword: (passwords) => api.put('/auth/change-password', passwords),
+  deleteAccount: () => api.delete('/auth/account'),
   linkStudent: (studentId) => api.put('/auth/link-student', { studentId }),
   unlinkStudent: () => api.put('/auth/unlink-student'),
 };

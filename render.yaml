@@ -1,0 +1,26 @@
+# Render deployment — single web service that builds the React frontend
+# and serves it from the Express backend with SPA fallback routing.
+#
+# Set the secret values (JWT_SECRET, ENCRYPTION_KEY, MONGODB_URI) in the
+# Render dashboard — they are intentionally NOT committed here.
+services:
+  - type: web
+    name: adhd-tracker
+    runtime: node
+    plan: free
+    buildCommand: npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend
+    startCommand: npm start --prefix backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      # Leave CLIENT_ORIGIN unset: the SPA is served from the same origin
+      # as the API, so no cross-origin allowance is required.

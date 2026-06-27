@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { authAPI } from '../services/api';
 
 const AuthContext = createContext(null);
@@ -6,86 +6,100 @@ const AuthContext = createContext(null);
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const isAuthenticated = Boolean(user);
 
   useEffect(() => {
-    // Check if user is logged in on mount
     const checkAuth = async () => {
       const token = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
 
-      if (token && storedUser) {
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      // Seed from cache for an instant render, then verify with the server.
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
         try {
           setUser(JSON.parse(storedUser));
-          setIsAuthenticated(true);
-        } catch (error) {
-          console.error('Error parsing stored user:', error);
-          localStorage.removeItem('token');
+        } catch {
           localStorage.removeItem('user');
         }
       }
 
-      setLoading(false);
+      try {
+        const response = await authAPI.getCurrentUser();
+        setUser(response.data.user);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      } catch {
+        // Invalid/expired token — clear the stale session.
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
     };
 
     checkAuth();
   }, []);
 
-  const login = async (email, password) => {
-    try {
-      const response = await authAPI.login({ email, password });
-      const { token, user: userData } = response.data;
+  const persistSession = useCallback((token, userData) => {
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
+  }, []);
 
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(userData));
+  const login = useCallback(
+    async (email, password) => {
+      try {
+        const response = await authAPI.login({ email, password });
+        const { token, user: userData } = response.data;
+        persistSession(token, userData);
+        return { success: true, user: userData };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.response?.data?.message || 'Login failed',
+        };
+      }
+    },
+    [persistSession]
+  );
 
-      setUser(userData);
-      setIsAuthenticated(true);
+  const register = useCallback(
+    async (userData) => {
+      try {
+        const response = await authAPI.register(userData);
+        const { token, user: newUser } = response.data;
+        persistSession(token, newUser);
+        return { success: true, user: newUser };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.response?.data?.message || 'Registration failed',
+        };
+      }
+    },
+    [persistSession]
+  );
 
-      return { success: true };
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.message || 'Login failed' 
-      };
-    }
-  };
+  const updateUser = useCallback((userData) => {
+    setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
+  }, []);
 
-  const register = async (userData) => {
-    try {
-      const response = await authAPI.register(userData);
-      const { token, user: newUser } = response.data;
-
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(newUser));
-
-      setUser(newUser);
-      setIsAuthenticated(true);
-
-      return { success: true };
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.message || 'Registration failed' 
-      };
-    }
-  };
-
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);
-    setIsAuthenticated(false);
-  };
+  }, []);
 
-  const value = {
-    user,
-    loading,
-    isAuthenticated,
-    login,
-    register,
-    logout,
-  };
+  const value = useMemo(
+    () => ({ user, loading, isAuthenticated, login, register, logout, updateUser }),
+    [user, loading, isAuthenticated, login, register, logout, updateUser]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

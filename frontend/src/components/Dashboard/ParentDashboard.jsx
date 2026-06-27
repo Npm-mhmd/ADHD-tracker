@@ -1,11 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { observationsAPI, authAPI } from '../../services/api';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuth } from '../../context/AuthContext';
+import { CATEGORIES, CATEGORY_BY_KEY, styleFor } from '../../constants/categories';
 import Navbar from '../Navigation/Navbar';
+import IntensityMeter from '../common/IntensityMeter';
+
+const formatDate = (dateString) =>
+  new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+const ChartTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border border-sand-200 bg-white px-3 py-2 text-sm shadow-lift dark:border-night-700 dark:bg-night-800">
+      <p className="mb-1 font-semibold text-ink dark:text-sand-50">{formatDate(label)}</p>
+      {payload.map((entry) => (
+        <p key={entry.name} className="flex items-center gap-2 text-ink-soft dark:text-sand-200">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
+          {entry.name}: <span className="font-semibold text-ink dark:text-sand-50">{entry.value}</span>
+        </p>
+      ))}
+    </div>
+  );
+};
 
 const ParentDashboard = () => {
-  const navigate = useNavigate();
+  const { user, updateUser } = useAuth();
   const [studentId, setStudentId] = useState('');
   const [studentData, setStudentData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -14,14 +34,13 @@ const ParentDashboard = () => {
   const [chartData, setChartData] = useState([]);
 
   useEffect(() => {
-    // Check if parent has already linked a child
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (user && user.linkedStudentId) {
+    if (user?.linkedStudentId) {
       setStudentId(user.linkedStudentId);
       setLinked(true);
       fetchStudentData(user.linkedStudentId);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.linkedStudentId]);
 
   const fetchStudentData = async (id) => {
     try {
@@ -30,7 +49,7 @@ const ParentDashboard = () => {
       setStudentData(response.data);
       setChartData(response.data.dailyAverages);
     } catch (err) {
-      setError('Failed to fetch student data. Please try again.');
+      setError('We couldn’t load your child’s data. Please try again.');
       console.error('Error fetching student data:', err);
     } finally {
       setLoading(false);
@@ -40,27 +59,20 @@ const ParentDashboard = () => {
   const handleLinkChild = async (e) => {
     e.preventDefault();
     if (!studentId.trim()) {
-      setError('Please enter a valid Student ID');
+      setError('Please enter the Student ID from your child’s teacher.');
       return;
     }
-
     try {
       setLoading(true);
       setError('');
-      
-      // Link student on the server
       const linkResponse = await authAPI.linkStudent(studentId);
-      
-      // Update user in local storage
-      localStorage.setItem('user', JSON.stringify(linkResponse.data.user));
-      
-      // Fetch student data
+      updateUser(linkResponse.data.user);
       const response = await observationsAPI.getParentObservations(studentId);
       setStudentData(response.data);
       setChartData(response.data.dailyAverages);
       setLinked(true);
     } catch (err) {
-      setError(err.response?.data?.message || 'Invalid Student ID. Please check and try again.');
+      setError(err.response?.data?.message || 'That Student ID didn’t match. Please check and try again.');
       console.error('Error linking child:', err);
     } finally {
       setLoading(false);
@@ -69,310 +81,166 @@ const ParentDashboard = () => {
 
   const handleUnlink = async () => {
     try {
-      // Unlink student on the server
       const unlinkResponse = await authAPI.unlinkStudent();
-      
-      // Update user in local storage
-      localStorage.setItem('user', JSON.stringify(unlinkResponse.data.user));
-      
-      // Clear local state
+      updateUser(unlinkResponse.data.user);
       setStudentId('');
       setStudentData(null);
       setLinked(false);
       setChartData([]);
     } catch (err) {
-      setError('Failed to unlink student. Please try again.');
+      setError('We couldn’t unlink right now. Please try again.');
       console.error('Error unlinking child:', err);
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
-  };
-
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
+  const focusCat = CATEGORY_BY_KEY.Focus;
+  const stressCat = CATEGORY_BY_KEY.Stress;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <Navbar title="Parent Dashboard" />
+    <div className="min-h-screen bg-page">
+      <Navbar title="Dashboard" />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="md:flex md:items-center md:justify-between mb-8">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-bold leading-7 text-gray-900 dark:text-white sm:text-3xl sm:truncate">
-              Parent Dashboard
-            </h2>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Monitor your child's progress and behavior patterns
-            </p>
-          </div>
-        </div>
-
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
         {!linked ? (
-          <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white">
-                Link Your Child
-              </h3>
-              <p className="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-                Enter the Student ID provided by your child's teacher to view their progress
+          <div className="mx-auto max-w-md py-6">
+            <div className="card-hover animate-rise p-7">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-100 to-brand-50 text-brand-700 dark:from-brand-900/50 dark:to-night-700 dark:text-brand-200 shadow-sm">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 11-5.656-5.656l1.5-1.5M10.172 13.828a4 4 0 010-5.656l3-3a4 4 0 115.656 5.656l-1.5 1.5" />
+                </svg>
+              </div>
+              <h2 className="mt-5 font-display text-2xl font-bold text-ink dark:text-sand-50">Link your child</h2>
+              <p className="mt-1.5 text-sm text-ink-soft dark:text-sand-200/70">
+                Enter the Student ID your child’s teacher shared with you to follow their progress.
               </p>
-            </div>
-            <div className="px-4 py-5 sm:p-6">
-              <form onSubmit={handleLinkChild}>
-                <div className="mb-4">
-                  <label htmlFor="studentId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Student ID
-                  </label>
+
+              <form onSubmit={handleLinkChild} className="mt-6 space-y-4">
+                <div>
+                  <label htmlFor="studentId" className="label">Student ID</label>
                   <input
-                    type="text"
                     id="studentId"
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
-                    className="mt-1 block w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                    placeholder="e.g., A1B2C3D4"
+                    className="input font-mono uppercase tracking-wider"
+                    placeholder="A1B2C3D4"
                   />
                 </div>
                 {error && (
-                  <div className="mb-4 bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4">
-                    <div className="flex">
-                      <div className="flex-shrink-0">
-                        <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.329 1.329a1 1 0 001.414-1.414L11.414 10l1.329-1.329a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                      <div className="ml-3">
-                        <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-                      </div>
-                    </div>
+                  <div className="rounded-xl border border-stress/20 bg-stress-soft px-4 py-3 text-sm text-stress-softText animate-fade-in" role="alert">
+                    {error}
                   </div>
                 )}
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:bg-primary-400"
-                >
-                  {loading ? 'Linking...' : 'Link Child'}
+                <button type="submit" disabled={loading} className="btn-primary w-full">
+                  {loading ? 'Linking…' : 'Link child'}
                 </button>
               </form>
             </div>
           </div>
         ) : (
           <>
-            <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
-              <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
-                <div>
-                  <h3 className="text-lg leading-6 font-medium text-gray-900">
-                    {studentData?.student?.name}
-                  </h3>
-                  <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                    Student ID: {studentData?.student?.studentId}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleUnlink}
-                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-full text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                >
-                  Unlink
-                </button>
+            <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="eyebrow">Following</p>
+                <h2 className="mt-2 font-display text-3xl font-bold text-ink dark:text-sand-50">{studentData?.student?.name}</h2>
+                <p className="mt-1 font-mono text-sm text-ink-muted">ID {studentData?.student?.studentId}</p>
               </div>
-            </div>
+              <button type="button" onClick={handleUnlink} className="btn-ghost self-start text-stress-softText hover:bg-stress-soft sm:self-auto">
+                Unlink
+              </button>
+            </header>
 
             {loading ? (
-              <div className="flex justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+              <div className="flex h-64 items-center justify-center">
+                <div className="h-10 w-10 animate-spin rounded-full border-2 border-sand-200 border-t-brand-600" />
               </div>
             ) : (
               <>
-                <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
-                  <div className="px-4 py-5 sm:px-6">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">
-                      Focus vs. Stress Trend
-                    </h3>
-                    <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                      Track your child's focus and stress levels over time
-                    </p>
+                {/* Hero: the trend that matters most */}
+                <section className="card-hover mt-8 p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-display text-lg font-bold text-ink dark:text-sand-50">Focus &amp; stress over time</h3>
+                      <p className="mt-1 text-sm text-ink-soft dark:text-sand-200/70">Daily averages, on a 1–5 scale.</p>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: focusCat.hex }} />Focus</span>
+                      <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: stressCat.hex }} />Stress</span>
+                    </div>
                   </div>
-                  <div className="px-4 py-5 sm:p-6">
-                    {chartData.length > 0 ? (
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={chartData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis 
-                              dataKey="date" 
-                              tickFormatter={formatDate}
-                            />
-                            <YAxis domain={[0, 5]} />
-                            <Tooltip 
-                              labelFormatter={formatDate}
-                              formatter={(value, name) => [value, name === 'focus' ? 'Focus' : 'Stress']}
-                            />
-                            <Legend />
-                            <Line 
-                              type="monotone" 
-                              dataKey="focus" 
-                              stroke="#3b82f6" 
-                              name="Focus"
-                              strokeWidth={2}
-                              activeDot={{ r: 8 }}
-                            />
-                            <Line 
-                              type="monotone" 
-                              dataKey="stress" 
-                              stroke="#ef4444" 
-                              name="Stress"
-                              strokeWidth={2}
-                              activeDot={{ r: 8 }}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                        </svg>
-                        <h3 className="mt-2 text-sm font-medium text-gray-900">No data available</h3>
-                        <p className="mt-1 text-sm text-gray-500">No observations have been logged yet.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
 
-                <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-6">
-                  <div className="px-4 py-5 sm:px-6">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">
-                      Average Scores by Category
-                    </h3>
-                    <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                      Overall average scores for each behavior category
-                    </p>
-                  </div>
-                  <div className="px-4 py-5 sm:p-6">
-                    {studentData?.averages ? (
-                      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                        <div className="bg-blue-50 overflow-hidden shadow rounded-lg">
-                          <div className="px-4 py-5 sm:p-6">
-                            <dt className="text-sm font-medium text-blue-500 truncate">Focus</dt>
-                            <dd className="mt-1 text-3xl font-semibold text-blue-600">
-                              {studentData.averages.Focus}/5
-                            </dd>
-                          </div>
-                        </div>
-                        <div className="bg-green-50 overflow-hidden shadow rounded-lg">
-                          <div className="px-4 py-5 sm:p-6">
-                            <dt className="text-sm font-medium text-green-500 truncate">Physical Energy</dt>
-                            <dd className="mt-1 text-3xl font-semibold text-green-600">
-                              {studentData.averages['Physical Energy']}/5
-                            </dd>
-                          </div>
-                        </div>
-                        <div className="bg-yellow-50 overflow-hidden shadow rounded-lg">
-                          <div className="px-4 py-5 sm:p-6">
-                            <dt className="text-sm font-medium text-yellow-500 truncate">Impulsivity</dt>
-                            <dd className="mt-1 text-3xl font-semibold text-yellow-600">
-                              {studentData.averages.Impulsivity}/5
-                            </dd>
-                          </div>
-                        </div>
-                        <div className="bg-red-50 overflow-hidden shadow rounded-lg">
-                          <div className="px-4 py-5 sm:p-6">
-                            <dt className="text-sm font-medium text-red-500 truncate">Stress</dt>
-                            <dd className="mt-1 text-3xl font-semibold text-red-600">
-                              {studentData.averages.Stress}/5
-                            </dd>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                        </svg>
-                        <h3 className="mt-2 text-sm font-medium text-gray-900">No data available</h3>
-                        <p className="mt-1 text-sm text-gray-500">No observations have been logged yet.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  {chartData.length > 0 ? (
+                    <div className="mt-6 h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+                          <CartesianGrid strokeDasharray="4 4" stroke="currentColor" className="text-sand-200 dark:text-night-700" />
+                          <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12, fill: 'currentColor' }} className="text-ink-muted" tickLine={false} axisLine={false} />
+                          <YAxis domain={[0, 5]} tick={{ fontSize: 12, fill: 'currentColor' }} className="text-ink-muted" tickLine={false} axisLine={false} />
+                          <Tooltip content={<ChartTooltip />} cursor={{ stroke: 'currentColor', strokeOpacity: 0.15 }} />
+                          <Line type="monotone" dataKey="focus" name="Focus" stroke={focusCat.hex} strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
+                          <Line type="monotone" dataKey="stress" name="Stress" stroke={stressCat.hex} strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="mt-8 py-10 text-center text-sm text-ink-muted">No observations have been logged yet.</p>
+                  )}
+                </section>
 
-                <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-lg">
-                  <div className="px-4 py-5 sm:px-6">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900">
-                      Recent Observations
-                    </h3>
-                    <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                      Latest observations logged by the teacher
-                    </p>
+                {/* Category averages */}
+                <section className="mt-6">
+                  <h3 className="font-display text-lg font-bold text-ink dark:text-sand-50">Averages by dimension</h3>
+                  <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    {CATEGORIES.map((category) => {
+                      const value = studentData?.averages?.[category.key] ?? 0;
+                      const styles = styleFor(category.key);
+                      return (
+                        <div key={category.key} className="card-hover p-5">
+                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${styles.soft}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${styles.dot}`} />
+                            {category.label}
+                          </span>
+                          <p className="mt-3 font-display text-3xl font-bold text-ink dark:text-sand-50">
+                            {value}
+                            <span className="text-base font-medium text-ink-muted">/5</span>
+                          </p>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="px-4 py-5 sm:p-6">
-                    {studentData?.observations && studentData.observations.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Date
-                              </th>
-                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Category
-                              </th>
-                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Intensity
-                              </th>
-                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Note
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
-                            {studentData.observations.slice(0, 10).map((observation, index) => (
-                              <tr key={index}>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  {new Date(observation.timestamp).toLocaleDateString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                  })}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  {observation.category}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    observation.intensity <= 2 ? 'bg-green-100 text-green-800' :
-                                    observation.intensity === 3 ? 'bg-yellow-100 text-yellow-800' :
-                                    'bg-red-100 text-red-800'
-                                  }`}>
-                                    {observation.intensity}/5
-                                  </span>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-gray-900">
-                                  {observation.note || '-'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <h3 className="mt-2 text-sm font-medium text-gray-900">No observations yet</h3>
-                        <p className="mt-1 text-sm text-gray-500">The teacher hasn't logged any observations for this student yet.</p>
-                      </div>
-                    )}
+                </section>
+
+                {/* Recent observations */}
+                <section className="card mt-6 overflow-hidden">
+                  <div className="border-b border-sand-200 bg-sand-50/50 px-6 py-4 dark:border-night-700 dark:bg-night-800/50">
+                    <h3 className="font-display text-lg font-bold text-ink dark:text-sand-50">Recent observations</h3>
+                    <p className="mt-0.5 text-sm text-ink-soft dark:text-sand-200/70">The latest notes from the classroom.</p>
                   </div>
-                </div>
+
+                  {studentData?.observations?.length > 0 ? (
+                    <ul className="divide-y divide-sand-200 dark:divide-night-700">
+                      {studentData.observations.slice(0, 10).map((obs, index) => {
+                        const styles = styleFor(obs.category);
+                        return (
+                          <li key={index} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4 transition-colors hover:bg-sand-50/50 dark:hover:bg-night-700/30">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${styles.soft}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${styles.dot}`} />
+                              {obs.category}
+                            </span>
+                            <IntensityMeter value={obs.intensity} category={obs.category} size="sm" />
+                            <span className="ml-auto text-xs text-ink-muted">
+                              {new Date(obs.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </span>
+                            {obs.note && (
+                              <p className="w-full text-sm text-ink-soft dark:text-sand-200/70">{obs.note}</p>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="px-6 py-12 text-center text-sm text-ink-muted">No observations have been logged for your child yet.</p>
+                  )}
+                </section>
               </>
             )}
           </>

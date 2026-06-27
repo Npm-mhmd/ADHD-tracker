@@ -24,6 +24,8 @@ const classSchema = new mongoose.Schema({
   timestamps: true
 });
 
+classSchema.index({ teacherId: 1, createdAt: -1 });
+
 const Class = mongoose.model('Class', classSchema);
 
 module.exports = Class;

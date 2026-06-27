@@ -1,76 +1,82 @@
 const express = require('express');
+const { body, param, query } = require('express-validator');
 const Student = require('../models/Student');
+const Class = require('../models/Class');
 const { auth, authorize } = require('../middleware/auth');
+const validate = require('../middleware/validate');
 
 const router = express.Router();
 
+const OBSERVATION_CATEGORIES = ['Focus', 'Physical Energy', 'Impulsivity', 'Stress'];
+
 // Log a new observation (teacher only)
-router.post('/log', auth, authorize('teacher'), async (req, res) => {
-  try {
-    const { studentId, category, intensity, note } = req.body;
+router.post(
+  '/log',
+  auth,
+  authorize('teacher'),
+  validate([
+    body('studentId').isString().trim().notEmpty().withMessage('Student ID is required'),
+    body('category').isIn(OBSERVATION_CATEGORIES).withMessage('Invalid category'),
+    body('intensity').isInt({ min: 1, max: 5 }).withMessage('Intensity must be between 1 and 5').toInt(),
+    body('note').optional().isString().trim().isLength({ max: 1000 }),
+  ]),
+  async (req, res) => {
+    try {
+      const { studentId, category, intensity, note } = req.body;
 
-    // Validate input
-    if (!studentId || !category || !intensity) {
-      return res.status(400).json({ message: 'Missing required fields' });
+      const student = await Student.findOne({ studentId });
+      if (!student) {
+        return res.status(404).json({ message: 'Student not found' });
+      }
+
+      const classData = await Class.findOne({
+        _id: student.classId,
+        teacherId: req.user._id,
+      });
+
+      if (!classData) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      const observation = {
+        category,
+        intensity,
+        note: note || '',
+        timestamp: new Date(),
+      };
+
+      student.observations.push(observation);
+      await student.save();
+
+      res.status(201).json({
+        message: 'Observation logged successfully',
+        observation,
+      });
+    } catch (error) {
+      console.error('Log observation error:', error);
+      res.status(500).json({ message: 'Server error logging observation' });
     }
-
-    if (intensity < 1 || intensity > 5) {
-      return res.status(400).json({ message: 'Intensity must be between 1 and 5' });
-    }
-
-    // Find the student
-    const student = await Student.findOne({ studentId });
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
-    }
-
-    // Verify the student belongs to the teacher's class
-    const Class = require('../models/Class');
-    const classData = await Class.findOne({ 
-      _id: student.classId, 
-      teacherId: req.user._id 
-    });
-
-    if (!classData) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    // Add the observation
-    const observation = {
-      category,
-      intensity,
-      note: note || '',
-      timestamp: new Date()
-    };
-
-    student.observations.push(observation);
-    await student.save();
-
-    res.status(201).json({
-      message: 'Observation logged successfully',
-      observation
-    });
-  } catch (error) {
-    console.error('Log observation error:', error);
-    res.status(500).json({ message: 'Server error logging observation' });
   }
-});
+);
 
 // Get observations for a student (parent view)
-router.get('/parent/child/:studentId', auth, authorize('parent'), async (req, res) => {
-  try {
-    const { studentId } = req.params;
+router.get(
+  '/parent/child/:studentId',
+  auth,
+  authorize('parent'),
+  validate([param('studentId').isString().trim().notEmpty()]),
+  async (req, res) => {
+    try {
+      const { studentId } = req.params;
 
-    // Verify the parent is linked to this student
-    if (req.user.linkedStudentId !== studentId) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
+      if (req.user.linkedStudentId !== studentId) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
 
-    // Find the student
-    const student = await Student.findOne({ studentId });
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
-    }
+      const student = await Student.findOne({ studentId });
+      if (!student) {
+        return res.status(404).json({ message: 'Student not found' });
+      }
 
     // Sort observations by timestamp (newest first)
     const sortedObservations = [...student.observations].sort(
@@ -151,44 +157,49 @@ router.get('/parent/child/:studentId', auth, authorize('parent'), async (req, re
 });
 
 // Get recent observations for a student (teacher view)
-router.get('/student/:studentId/recent', auth, authorize('teacher'), async (req, res) => {
-  try {
-    const { studentId } = req.params;
-    const limit = parseInt(req.query.limit) || 10;
+router.get(
+  '/student/:studentId/recent',
+  auth,
+  authorize('teacher'),
+  validate([
+    param('studentId').isString().trim().notEmpty(),
+    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  ]),
+  async (req, res) => {
+    try {
+      const { studentId } = req.params;
+      const limit = req.query.limit || 10;
 
-    // Find the student
-    const student = await Student.findOne({ studentId });
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
+      const student = await Student.findOne({ studentId });
+      if (!student) {
+        return res.status(404).json({ message: 'Student not found' });
+      }
+
+      const classData = await Class.findOne({
+        _id: student.classId,
+        teacherId: req.user._id,
+      });
+
+      if (!classData) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      const recentObservations = [...student.observations]
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, limit);
+
+      res.json({
+        student: {
+          studentId: student.studentId,
+          name: student.decryptName(),
+        },
+        observations: recentObservations,
+      });
+    } catch (error) {
+      console.error('Get recent observations error:', error);
+      res.status(500).json({ message: 'Server error fetching observations' });
     }
-
-    // Verify the student belongs to the teacher's class
-    const Class = require('../models/Class');
-    const classData = await Class.findOne({ 
-      _id: student.classId, 
-      teacherId: req.user._id 
-    });
-
-    if (!classData) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    // Get recent observations
-    const recentObservations = [...student.observations]
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, limit);
-
-    res.json({
-      student: {
-        studentId: student.studentId,
-        name: student.decryptName()
-      },
-      observations: recentObservations
-    });
-  } catch (error) {
-    console.error('Get recent observations error:', error);
-    res.status(500).json({ message: 'Server error fetching observations' });
   }
-});
+);
 
 module.exports = router;

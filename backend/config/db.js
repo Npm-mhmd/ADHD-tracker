@@ -1,15 +1,16 @@
 const mongoose = require('mongoose');
+const config = require('./env');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/adhd-monitoring', {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    mongoose.set('strictQuery', true);
+
+    const conn = await mongoose.connect(config.mongoUri);
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+    return conn;
   } catch (error) {
-    console.error(`Error: ${error.message}`);
+    console.error(`MongoDB connection error: ${error.message}`);
     process.exit(1);
   }
 };
